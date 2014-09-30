@@ -1,7 +1,7 @@
 'use strict';
 var gutil = require('gulp-util');
 var through = require('through2');
-var traceur = require('traceur');
+var traceurAPI = require('traceur/src/node/api');
 var applySourceMap = require('vinyl-sourcemaps-apply');
 var objectAssign = require('object-assign');
 
@@ -19,41 +19,39 @@ module.exports = function (options) {
 			return cb();
 		}
 
-		var ret;
-
-		var fileOptions = objectAssign({}, options);
-		fileOptions.filename = file.relative;
+		var fileOptions = objectAssign({
+            modules: 'commonjs'
+        }, options);
 
 		if (file.sourceMap) {
 			fileOptions.sourceMaps = true;
 		}
 
 		try {
-			ret = traceur.compile(file.contents.toString(), fileOptions);
+            var compiler = new traceurAPI.NodeCompiler(fileOptions);
+			var ret = compiler.compile(file.contents.toString(), file.relative, file.relative, file.base);
+            var generatedSourceMap = compiler.getSourceMap();
 
-			if (ret.js) {
-				file.contents = new Buffer(ret.js);
-			}
+            if (ret) {
+                file.contents = new Buffer(ret);
+            }
 
-			if (ret.generatedSourceMap && file.sourceMap) {
-				applySourceMap(file, ret.generatedSourceMap);
+			if (generatedSourceMap && file.sourceMap) {
+				applySourceMap(file, generatedSourceMap);
 			}
 		} catch (err) {
-			this.emit('error', new gutil.PluginError('gulp-traceur', err, {
-				fileName: file.path
-			}));
+            if (Array.isArray(err)) {
+                this.emit('error', new gutil.PluginError('gulp-traceur', err.join('\n'), {
+                    fileName: file.path,
+                    showStack: false
+                }));
+            } else {
+    			this.emit('error', new gutil.PluginError('gulp-traceur', err, {
+    				fileName: file.path
+    			}));
+            }
 		}
 
-		if (ret.errors.length > 0) {
-			this.emit('error', new gutil.PluginError('gulp-traceur', '\n' + ret.errors.join('\n'), {
-				fileName: file.path,
-				showStack: false
-			}));
-		}
-
-		this.push(file);
-		cb();
+		cb(null, file);
 	});
 };
-
-module.exports.RUNTIME_PATH = traceur.RUNTIME_PATH;
